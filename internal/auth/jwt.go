@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -77,9 +79,23 @@ func GetBearerToken(headers http.Header) (string, error) {
 		return "", errors.New("no bearer token attached")
 	}
 
-	// if err!=nil{
-	// 	fmt.Errorf("Error while getting bearer token in jwt.go, line 75: %w", err)
-	// }
-
 	return bearerVal[1], nil
+}
+
+func MakeRefreshToken() (string, error) {
+	randString := make([]byte, 32)
+	rand.Read(randString)
+	return hex.EncodeToString([]byte(randString)), nil
+
+}
+
+func GetAPIKey(headers http.Header) (string, error) {
+	apiKeyValue := headers.Get("Authorization")
+
+	keyVal := strings.Split(apiKeyValue, "ApiKey ")
+	if len(keyVal) < 2 {
+		return "", errors.New("no bearer token attached")
+	}
+
+	return strings.Trim(keyVal[1], " "), nil
 }

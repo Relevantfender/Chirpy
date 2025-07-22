@@ -120,16 +120,40 @@ func (cfg *apiConfig) handleGetChirps(w http.ResponseWriter, r *http.Request) {
 		Body       string    `json:"body"`
 		UserId     uuid.UUID `json:"user_id"`
 	}
+	authorId := r.URL.Query().Get("author_id")
+	sortingOrder := r.URL.Query().Get("sort")
+	if sortingOrder == "" {
+		sortingOrder = "asc"
+	}
 
-	chirps, err := cfg.dbQueries.GetChirps(r.Context())
+	var chirps []database.Chirp
+	var err error
+
+	if authorId != "" {
+		uuid, err := uuid.Parse(authorId)
+		if err != nil {
+			respondWithError(w, http.StatusNotFound, "Invalid author id", err)
+			return
+		}
+		chirps, err = cfg.dbQueries.GetChirpsByAuthorId(r.Context(), uuid)
+	} else {
+		chirps, err = cfg.dbQueries.GetChirps(r.Context())
+	}
 
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "No chirps found", err)
 		return
 	}
-	sort.Slice(chirps, func(i, j int) bool {
-		return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
-	})
+
+	if sortingOrder == "asc" {
+		sort.Slice(chirps, func(i, j int) bool {
+			return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
+		})
+	} else {
+		sort.Slice(chirps, func(i, j int) bool {
+			return chirps[j].CreatedAt.Before(chirps[i].CreatedAt)
+		})
+	}
 	var response []responseVals
 
 	for _, chirp := range chirps {
@@ -178,4 +202,64 @@ func (cfg *apiConfig) handleGetChirpByID(w http.ResponseWriter, r *http.Request)
 		UserID:     chirp.UserID,
 	}
 	respondWithJSON(w, http.StatusOK, response)
+}
+
+func (cfg *apiConfig) handlerDeleteChirp(w http.ResponseWriter, r *http.Request) {
+	path_value := r.PathValue("chirpID")
+	if path_value == "" {
+		respondWithError(w, http.StatusBadRequest, "Please provide a chirp id", nil)
+		log.Print("No chirp id in path")
+		return
+	}
+
+	chirpID, err := uuid.Parse(path_value)
+
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Bad id value passed", err)
+		log.Print("Bad id value passed")
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "error in getting bearer token", err)
+		log.Printf("Error while getting bearer token: %v", err)
+		return
+	}
+
+	userId, err := auth.ValidateJWT(token, cfg.jwtSecret)
+
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "error in validating the token", err)
+		log.Printf("Error while validating a jwt: %v", err)
+		return
+	}
+
+	chirp, err := cfg.dbQueries.GetChirpsById(r.Context(), chirpID)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			respondWithError(w, http.StatusNotFound, "No chirps found", err)
+			log.Printf("Error while validating a jwt: %v", err)
+			return
+		}
+		respondWithError(w, http.StatusInternalServerError, "Error while querying the chirps", err)
+		log.Printf("Error while querying the chirps: %v", err)
+		return
+	}
+	if userId != chirp.UserID {
+		respondWithError(w, http.StatusForbidden, "Not allowed", err)
+		log.Printf("Error while checking the id of the author: %v", err)
+		return
+	}
+
+	err = cfg.dbQueries.DeleteChirpById(r.Context(), chirp.ID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error while deleting the resource chirp", err)
+		log.Printf("Error while deleting the resource chirp: %v", err)
+		return
+	}
+	respondWithJSON(w, http.StatusNoContent, nil)
+
 }

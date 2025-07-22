@@ -14,5 +14,14 @@ RETURNING *;
 -- name: GetChirps :many
 SELECT * FROM chirps;
 
+-- name: GetChirpsByAuthorId :many
+SELECT * FROM chirps 
+WHERE user_id = $1;
+
 -- name: GetChirpsById :one
 SELECT * FROM chirps WHERE id = $1;
+
+
+-- name: DeleteChirpById :exec
+DELETE FROM chirps WHERE id = $1;
+
