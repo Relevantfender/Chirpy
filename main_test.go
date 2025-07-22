@@ -1,14 +1,20 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Relevantfender/internal/database"
+	"github.com/google/uuid"
+	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestApiConfig(t *testing.T) {
@@ -43,7 +49,6 @@ func TestApiConfig(t *testing.T) {
 	t.Run("fileserverHits increment", func(t *testing.T) {
 		apiCfg := apiConfig{
 			fileserverHits: atomic.Int32{},
-			dbQueries:      database.New(db),
 		}
 
 		// Test atomic increment
@@ -325,12 +330,10 @@ func TestRouteRegistration(t *testing.T) {
 	t.Run("route registration", func(t *testing.T) {
 		mux := http.NewServeMux()
 
-		// Register routes (similar to main function)
 		mux.HandleFunc("GET /api/healthz", handlerReadiness)
 		mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
 		mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 
-		// Test that routes are registered by making requests
 		testCases := []struct {
 			method         string
 			path           string
@@ -356,3 +359,83 @@ func TestRouteRegistration(t *testing.T) {
 		}
 	})
 }
+
+func TestJwtCreatingInLogin(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("Failed to create mock database: %v", err)
+	}
+	defer db.Close()
+
+	queries := database.New(db)
+
+	type reqValues struct {
+		Password         string `json:"password"`
+		Email            string `json:"email"`
+		ExpiresInSeconds int    `json:"expires_in_seconds"`
+	}
+
+	email := "test@example.com"
+	password := "test"
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+	if err != nil {
+		t.Errorf("Expected no error while hashing password, got %v:", err)
+		return
+	}
+	userID := uuid.New()
+	createdAt := time.Now()
+	updatedAt := createdAt
+
+	mock.ExpectQuery(`(?s)SELECT id, created_at, updated_at, email, hashed_password FROM users\s+WHERE email = \$1`).
+		WithArgs(email).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at", "email", "hashed_password"}).
+			AddRow(userID, createdAt, updatedAt, email, hashedPassword))
+	godotenv.Load()
+	jwtSecretString := os.Getenv("JWT_SECRET")
+
+	cfg := apiConfig{
+		fileserverHits: atomic.Int32{},
+		dbQueries:      queries,
+		jwtSecret:      jwtSecretString,
+	}
+	recorder := httptest.NewRecorder()
+
+	t.Run("Successful login", func(t *testing.T) {
+		request := reqValues{
+			Password:         password,
+			Email:            email,
+			ExpiresInSeconds: 36,
+		}
+		preparedRequest, err := json.Marshal(request)
+
+		if err != nil {
+			t.Errorf("No error expected during marshaling of the request, got %v", err)
+			return
+		}
+
+		reqPost := httptest.NewRequest("POST", "/api/login", bytes.NewReader(preparedRequest))
+		reqPost.Header.Set("Content-Type", "application/json")
+
+		cfg.HandleUserLogin(recorder, reqPost)
+
+		if recorder.Code != http.StatusOK {
+			t.Errorf("expected status code %v, got: %v", http.StatusOK, recorder.Code)
+		}
+
+	})
+
+}
+
+// func TestChirpValidation(t *testing.T) {
+
+// 	db, mock, err := sqlmock.New()
+
+// 	if err != nil {
+// 		t.Fatalf("Expected no errors while creating db, got: %v", err)
+// 	}
+
+// 	// query := database.New(db)
+
+// 	mock.ExpectQuery(``).WillReturnRows()
+// }

@@ -1,7 +1,10 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -9,9 +12,9 @@ import (
 )
 
 func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
-	time := time.Now().UTC()
-	currentTime := jwt.NewNumericDate(time)
-	expiryDate := jwt.NewNumericDate(time.Add(expiresIn))
+	clock := time.Now().UTC()
+	currentTime := jwt.NewNumericDate(clock)
+	expiryDate := jwt.NewNumericDate(clock.Add(expiresIn))
 	claims := jwt.RegisteredClaims{
 		Issuer:    "chirpy",
 		IssuedAt:  currentTime,
@@ -23,7 +26,7 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 		jwt.SigningMethodHS256,
 		claims,
 	)
-	tokenString, err := token.SignedString(tokenSecret)
+	tokenString, err := token.SignedString([]byte(tokenSecret))
 	if err != nil {
 		return "", err
 	}
@@ -65,4 +68,18 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	}
 
 	return userID, nil
+}
+
+func GetBearerToken(headers http.Header) (string, error) {
+	bearer := headers.Get("Authorization")
+	bearerVal := strings.Split(bearer, "Bearer ")
+	if len(bearerVal) < 2 {
+		return "", errors.New("no bearer token attached")
+	}
+
+	// if err!=nil{
+	// 	fmt.Errorf("Error while getting bearer token in jwt.go, line 75: %w", err)
+	// }
+
+	return bearerVal[1], nil
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -16,15 +15,17 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
+	jwtSecret      string
 }
 
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
+	jwtSecret := os.Getenv("JWT_SECRET")
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
-		fmt.Errorf("Error while opening DB: %w", err)
+		log.Fatalf("Unable to connect to a db: %v", err)
 		return
 	}
 
@@ -34,6 +35,7 @@ func main() {
 	apiCfg := apiConfig{
 		fileserverHits: atomic.Int32{},
 		dbQueries:      database.New(db),
+		jwtSecret:      jwtSecret,
 	}
 
 	mux := http.NewServeMux()
@@ -42,15 +44,15 @@ func main() {
 	mux.Handle("/app/", fsHandler)
 
 	mux.HandleFunc("GET /api/healthz", handlerReadiness)
+	mux.HandleFunc("POST /api/login", apiCfg.HandleUserLogin)
+	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
 
-	mux.HandleFunc("POST /api/validate_chirp", handlerChirpsValidate)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
-	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
-	mux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirps)
+
 	mux.HandleFunc("GET /api/chirps", apiCfg.handleGetChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handleGetChirpByID)
-	mux.HandleFunc("POST /api/login", apiCfg.HandleUserLogin)
+	mux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirps)
 
 	srv := &http.Server{
 		Addr:    ":" + port,

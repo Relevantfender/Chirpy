@@ -54,7 +54,7 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 	userData, err := cfg.dbQueries.CreateUser(r.Context(), dto)
 
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "error while creating the user", err)
+		respondWithError(w, http.StatusInternalServerError, "error while creating the user in handlerCreateUser, line 57", err)
 		return
 	}
 	respondWithJSON(w, http.StatusCreated, response{

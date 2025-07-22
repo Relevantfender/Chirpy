@@ -4,10 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"sort"
 	"time"
 
+	"github.com/Relevantfender/internal/auth"
 	"github.com/Relevantfender/internal/database"
 	"github.com/google/uuid"
 )
@@ -26,13 +28,11 @@ func (cfg *apiConfig) handlerCreateChirps(w http.ResponseWriter, r *http.Request
 		Body       string    `json:"body"`
 		User_id    uuid.UUID `json:"user_id"`
 	}
-
 	request := requestVals{}
 
 	decoder := json.NewDecoder(r.Body)
 
 	err := decoder.Decode(&request)
-
 	if err != nil {
 		respondWithError(
 			w,
@@ -42,6 +42,21 @@ func (cfg *apiConfig) handlerCreateChirps(w http.ResponseWriter, r *http.Request
 		)
 		return
 	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Error while retrieving bearer:", err)
+		return
+	}
+
+	tokenId, err := auth.ValidateJWT(token, cfg.jwtSecret)
+
+	if err != nil {
+		log.Printf("Error while validating token: %v", err)
+		respondWithError(w, http.StatusUnauthorized, "Error while validating token:", err)
+		return
+	}
+
 	if request.Body == "" {
 		respondWithError(
 			w,
@@ -51,7 +66,7 @@ func (cfg *apiConfig) handlerCreateChirps(w http.ResponseWriter, r *http.Request
 		)
 		return
 	}
-	if (request.User_id == uuid.UUID{}) {
+	if (tokenId == uuid.UUID{}) {
 		respondWithError(
 			w,
 			http.StatusBadRequest,
@@ -78,7 +93,7 @@ func (cfg *apiConfig) handlerCreateChirps(w http.ResponseWriter, r *http.Request
 	request.Body = cleaned
 	args := database.CreateChirpParams{
 		Body:   cleaned,
-		UserID: request.User_id,
+		UserID: tokenId,
 	}
 	response, err := cfg.dbQueries.CreateChirp(r.Context(), args)
 	if err != nil {
@@ -126,11 +141,7 @@ func (cfg *apiConfig) handleGetChirps(w http.ResponseWriter, r *http.Request) {
 			UserId:     chirp.UserID,
 		})
 	}
-	// resp, err := json.Marshal(response)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Error while marshalling in line 129 of handler_chip", err)
-		return
-	}
+
 	respondWithJSON(w, http.StatusOK, response)
 
 }

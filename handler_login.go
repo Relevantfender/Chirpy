@@ -11,8 +11,9 @@ import (
 
 func (cfg *apiConfig) HandleUserLogin(w http.ResponseWriter, r *http.Request) {
 	type reqVals struct {
-		Password string `json:"password"`
-		Email    string `json:"email"`
+		Password         string `json:"password"`
+		Email            string `json:"email"`
+		ExpiresInSeconds int    `json:"expires_in_seconds"`
 	}
 
 	type respVals struct {
@@ -20,8 +21,10 @@ func (cfg *apiConfig) HandleUserLogin(w http.ResponseWriter, r *http.Request) {
 		CreatedAt time.Time `json:"created_at"`
 		UpdatedAt time.Time `json:"updated_at"`
 		Email     string    `json:"email"`
+		Token     string    `json:"token"`
 	}
-
+	// seconds in an hour * 100 for nano seconds
+	oneHour := 3600
 	request := reqVals{}
 
 	decoder := json.NewDecoder(r.Body)
@@ -43,22 +46,16 @@ func (cfg *apiConfig) HandleUserLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if request.ExpiresInSeconds == 0 || request.ExpiresInSeconds > 3600 {
+		request.ExpiresInSeconds = oneHour
+	}
+
 	user, err := cfg.dbQueries.FindUserByEmail(r.Context(), request.Email)
 
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Error while retrieving user from database", err)
 		return
 	}
-
-	// hashedPass, err := auth.HashPassword(request.Password)
-	// if err != nil {
-	// 	respondWithError(
-	// 		w,
-	// 		http.StatusInternalServerError,
-	// 		"Error while hashing the password from request while login",
-	// 		err,
-	// 	)
-	// }
 
 	err = auth.CheckPasswordHash(request.Password, user.HashedPassword)
 	if err != nil {
@@ -71,11 +68,20 @@ func (cfg *apiConfig) HandleUserLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	jwtToken, err := auth.MakeJWT(
+		user.ID,
+		cfg.jwtSecret,
+		time.Duration(request.ExpiresInSeconds)*time.Second,
+	)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error while creating a jwt token", err)
+	}
 	response := respVals{
 		Id:        user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
+		Token:     jwtToken,
 	}
 
 	respondWithJSON(
